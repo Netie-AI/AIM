@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netie.ai/aim/schemas/record.schema.json",
+  "title": "LedgerRecord",
+  "description": "An append-only typed fact. Nothing enters state without provenance and confidence. Corrections are new records that supersede old ones; records are never edited or deleted.",
+  "type": "object",
+  "required": ["id", "type", "occurred_at", "recorded_at", "provenance", "confidence", "body"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "type": { "type": "string", "description": "Record type from the closed type registry." },
+
+    "occurred_at": {
+      "type": "string", "format": "date-time",
+      "description": "When the fact was true in the world."
+    },
+    "recorded_at": {
+      "type": "string", "format": "date-time",
+      "description": "When we learned it. Bitemporal: both are required to replay a decision as it looked at the time."
+    },
+
+    "provenance": {
+      "type": "object",
+      "required": ["origin"],
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "enum": ["symbolic", "extracted", "derived", "human"],
+          "description": "symbolic = settled/authoritative source. extracted = model-read from unstructured input. derived = computed from other records. human = entered by a person."
+        },
+        "source_system": { "type": "string" },
+        "source_document": { "type": "string" },
+        "source_span": {
+          "type": "object",
+          "description": "Exact location in the source. Required for origin=extracted.",
+          "properties": {
+            "start": { "type": "integer", "minimum": 0 },
+            "end": { "type": "integer", "minimum": 0 },
+            "page": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "extractor_version": {
+          "type": "string",
+          "description": "Content hash of the model artifact. Required for origin=extracted; needed for replay determinism."
+        },
+        "parent_ids": {
+          "type": "array", "items": { "type": "string", "format": "uuid" },
+          "description": "Inputs this record was computed from. Required for origin=derived. Provenance is never stripped by aggregation (R-09)."
+        },
+        "actor": { "type": "string", "description": "Person responsible. Required for origin=human." }
+      },
+      "allOf": [
+        { "if": { "properties": { "origin": { "const": "extracted" } } },
+          "then": { "required": ["source_document", "source_span", "extractor_version"] } },
+        { "if": { "properties": { "origin": { "const": "derived" } } },
+          "then": { "required": ["parent_ids"] } },
+        { "if": { "properties": { "origin": { "const": "human" } } },
+          "then": { "required": ["actor"] } }
+      ]
+    },
+
+    "confidence": {
+      "type": "number", "minimum": 0, "exclusiveMaximum": 1.0000001,
+      "description": "1.0 permitted ONLY when provenance.origin = symbolic. Model-extracted records are < 1.0 and stay marked forever."
+    },
+
+    "supersedes": {
+      "type": "string", "format": "uuid",
+      "description": "Correction pointer. The superseded record stays in the store; append-only means a wrong record is corrected, never erased, or replay is a lie."
+    },
+
+    "entries": {
+      "type": "array",
+      "description": "Double-entry lines. Must balance to zero per currency. An action that will not compile to balanced entries cannot be committed at all.",
+      "items": {
+        "type": "object",
+        "required": ["account", "amount", "currency"],
+        "additionalProperties": false,
+        "properties": {
+          "account": { "type": "string" },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(\\.[0-9]+)?$",
+            "description": "Decimal string. NEVER a JSON number: float breaks both the balance identity and determinism (R-05)."
+          },
+          "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+        }
+      }
+    },
+
+    "body": { "type": "object", "description": "Type-specific payload, validated against the registry entry for `type`." }
+  },
+
+  "allOf": [
+    {
+      "if": { "properties": { "confidence": { "const": 1.0 } }, "required": ["confidence"] },
+      "then": { "properties": { "provenance": { "properties": { "origin": { "const": "symbolic" } } } } }
+    }
+  ]
+}

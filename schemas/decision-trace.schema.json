@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netie.ai/aim/schemas/decision-trace.schema.json",
+  "title": "DecisionTrace",
+  "description": "The primary artifact. A DAG of state -> action -> predicted successor -> evidence -> checks passed. Replayable offline, diffable across versions. Prose is rendered FROM this and is never the source of truth.",
+  "type": "object",
+  "required": ["trace_id", "as_of", "root_state_ref", "nodes", "committed", "determinism", "objective"],
+  "additionalProperties": false,
+
+  "properties": {
+    "trace_id": { "type": "string", "format": "uuid" },
+
+    "as_of": {
+      "type": "string", "format": "date-time",
+      "description": "Bitemporal cut. State is reconstructed using only records with recorded_at <= as_of."
+    },
+
+    "root_state_ref": {
+      "type": "object",
+      "required": ["ledger_hash"],
+      "properties": {
+        "ledger_hash": { "type": "string", "description": "Content hash of ledger state at as_of. Replay input." }
+      }
+    },
+
+    "determinism": {
+      "type": "object",
+      "description": "Everything needed to re-execute byte-identically (R-05). Replay CI diffs traces on every commit.",
+      "required": ["seed", "artifact_hashes", "invariant_set_version", "objective_version"],
+      "properties": {
+        "seed": { "type": "integer" },
+        "artifact_hashes": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Content hash per model artifact. Pinned, never a floating tag."
+        },
+        "invariant_set_version": { "type": "string" },
+        "objective_version": { "type": "string" },
+        "symbolic_model_version": { "type": "string" },
+        "residual_model_version": { "type": "string" }
+      }
+    },
+
+    "objective": {
+      "type": "object",
+      "description": "Versioned, reviewed artifact with the same governance status as the invariant set (R-03).",
+      "required": ["version", "form"],
+      "properties": {
+        "version": { "type": "string" },
+        "form": {
+          "enum": ["lexicographic", "constrained_scalar"],
+          "description": "Lexicographic preferred: hard constraints then ordered preferences. Scalarization buries tradeoffs in weights."
+        },
+        "tradeoff_made": {
+          "type": "string",
+          "description": "What was given up and what was bought, in the committed branch. Makes the objective visible per-decision, not only in config."
+        }
+      }
+    },
+
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["node_id", "depth", "action", "predicted_successor", "shield", "speculative"],
+        "additionalProperties": false,
+        "properties": {
+          "node_id": { "type": "string" },
+          "parent_id": { "type": ["string", "null"] },
+          "depth": { "type": "integer", "minimum": 0 },
+
+          "action": { "$ref": "https://netie.ai/aim/schemas/action.schema.json" },
+
+          "predicted_successor": {
+            "type": "object",
+            "required": ["symbolic"],
+            "properties": {
+              "symbolic": {
+                "type": "object",
+                "description": "Exact. Pure function of state and action; no seed needed."
+              },
+              "residual": {
+                "type": "object",
+                "description": "Learned correction against the symbolic baseline. Uncertainty is split and NEVER summed.",
+                "properties": {
+                  "point": { "type": "object" },
+                  "aleatoric": { "type": "number", "minimum": 0, "description": "World noise. Irreducible; plan under it." },
+                  "epistemic": { "type": "number", "minimum": 0, "description": "Never seen this before. Reducible; route to a human." },
+                  "conformal_interval": {
+                    "type": "object",
+                    "description": "Distribution-free coverage. The auditable form of the confidence claim: an interval whose historical coverage rate anyone can re-derive from the replay corpus.",
+                    "properties": {
+                      "lower": { "type": "string" },
+                      "upper": { "type": "string" },
+                      "nominal_coverage": { "type": "number", "minimum": 0, "maximum": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          },
+
+          "speculative": {
+            "type": "boolean",
+            "description": "True past the calibrated horizon (R-01). A speculative node MAY NOT be cited in justification[] of a committed action - only as context. The trail renders its own uncertainty."
+          },
+
+          "horizon_stop": {
+            "enum": ["error_budget", "decision_relevance", "shield_pruned", "terminal", null],
+            "description": "decision_relevance = top-1 ranking flipped under bootstrap resampling. That is the real horizon."
+          },
+
+          "evidence": {
+            "type": "array", "items": { "type": "string", "format": "uuid" },
+            "description": "Ledger record ids this node depends on. Provenance chases through to source."
+          },
+
+          "shield": {
+            "type": "object",
+            "required": ["checks", "result"],
+            "description": "Checked OUTSIDE the network, on every candidate branch, before commit. A violation prunes; it is not argued with.",
+            "properties": {
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["invariant_id", "passed"],
+                  "properties": {
+                    "invariant_id": { "type": "string" },
+                    "passed": { "type": "boolean", "description": "Total: every invariant returns an explicit pass/fail. No silent not-applicable." },
+                    "detail": { "type": "string" }
+                  }
+                }
+              },
+              "result": { "enum": ["pass", "pruned"] }
+            }
+          },
+
+          "score": {
+            "type": "object",
+            "properties": {
+              "cost": { "type": "string" },
+              "tail_bound": { "type": "string" },
+              "tail_source": {
+                "enum": ["symbolic", "learned"],
+                "description": "Symbolic bounds preferred: tails are where learned data is thinnest and where the design leans hardest. A loose symbolic bound fails safe (R-03)."
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "committed": {
+      "type": "object",
+      "required": ["node_id", "authority"],
+      "properties": {
+        "node_id": { "type": "string" },
+        "authority": {
+          "enum": ["human", "bounded_autonomy"],
+          "description": "The neural component is never an option here. bounded_autonomy requires the action class to be inside a proven envelope (P5)."
+        },
+        "envelope_id": { "type": "string", "description": "Required for bounded_autonomy: the grant, traceable to the replay evidence that earned it." },
+        "justification": {
+          "type": "array", "items": { "type": "string" },
+          "description": "node_ids supporting the commit. MUST NOT contain any node with speculative=true."
+        }
+      }
+    },
+
+    "rendered": {
+      "type": "string",
+      "description": "Prose for humans, regenerated from this trace on read. A view, never a source. If prose and trace disagree, the trace wins by construction."
+    }
+  }
+}

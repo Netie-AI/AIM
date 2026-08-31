@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netie.ai/aim/schemas/action.schema.json",
+  "title": "Action",
+  "description": "A typed action from the closed catalog. Bounded arity, validated arguments. Anything unexpressible here is refused, not approximated. ABSTAIN is always legal.",
+  "type": "object",
+  "required": ["kind", "args", "proposed_by", "fit"],
+  "additionalProperties": false,
+
+  "properties": {
+    "kind": {
+      "enum": ["transfer", "hold", "flag", "request_document", "escalate", "abstain"],
+      "description": "The catalog is closed. Adding a member is a reviewed change, driven by gap telemetry (R-02), never an ad-hoc extension."
+    },
+
+    "args": { "type": "object" },
+
+    "proposed_by": {
+      "type": "object",
+      "required": ["component", "version"],
+      "properties": {
+        "component": { "enum": ["proposer", "search", "human"] },
+        "version": { "type": "string", "description": "Content hash of the proposing artifact." },
+        "seed": { "type": "integer", "description": "Required when component=proposer. Recorded for replay determinism." }
+      }
+    },
+
+    "fit": {
+      "type": "number", "minimum": 0, "maximum": 1,
+      "description": "How well this action fits the situation, scored INDEPENDENTLY of how it ranked. Low fit + high margin is the signature of a nearest-expressible fallback (R-02) and is alertable."
+    },
+
+    "margin": {
+      "type": "number",
+      "description": "How much this action beat ABSTAIN by. Must exceed the class's stated margin threshold, not merely be positive."
+    },
+
+    "preconditions_checked": {
+      "type": "array", "items": { "type": "string" },
+      "description": "Applicability, not just well-typedness. A transfer citing a closed account is valid JSON and an invalid act."
+    }
+  },
+
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "transfer" } }, "required": ["kind"] },
+      "then": { "properties": { "args": {
+        "type": "object",
+        "required": ["from_account", "to_account", "amount", "currency"],
+        "additionalProperties": false,
+        "properties": {
+          "from_account": { "type": "string" },
+          "to_account": { "type": "string" },
+          "amount": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+          "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+          "value_date": { "type": "string", "format": "date" }
+        }
+      } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "hold" } }, "required": ["kind"] },
+      "then": { "properties": { "args": {
+        "type": "object",
+        "required": ["subject_id", "reason_code", "until"],
+        "additionalProperties": false,
+        "properties": {
+          "subject_id": { "type": "string" },
+          "reason_code": { "type": "string" },
+          "until": { "type": "string", "format": "date-time" }
+        }
+      } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "flag" } }, "required": ["kind"] },
+      "then": { "properties": { "args": {
+        "type": "object",
+        "required": ["subject_id", "reason_code", "severity"],
+        "additionalProperties": false,
+        "properties": {
+          "subject_id": { "type": "string" },
+          "reason_code": { "type": "string" },
+          "severity": { "enum": ["low", "medium", "high"] }
+        }
+      } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "request_document" } }, "required": ["kind"] },
+      "then": { "properties": { "args": {
+        "type": "object",
+        "required": ["counterparty_id", "document_type"],
+        "additionalProperties": false,
+        "properties": {
+          "counterparty_id": { "type": "string" },
+          "document_type": { "type": "string" },
+          "due_by": { "type": "string", "format": "date" }
+        }
+      } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "escalate" } }, "required": ["kind"] },
+      "then": { "properties": { "args": {
+        "type": "object",
+        "required": ["queue", "reason", "epistemic_uncertainty", "outcome_spread"],
+        "additionalProperties": false,
+        "properties": {
+          "queue": { "type": "string" },
+          "reason": { "type": "string" },
+          "epistemic_uncertainty": { "type": "number", "minimum": 0 },
+          "outcome_spread": {
+            "type": "number", "minimum": 0,
+            "description": "Escalation triggers on epistemic x spread, not raw uncertainty: high uncertainty where every branch scores alike does not need a human (R-08)."
+          }
+        }
+      } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "abstain" } }, "required": ["kind"] },
+      "then": { "properties": { "args": {
+        "type": "object",
+        "required": ["reason", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "reason": { "enum": ["no_option_beat_margin", "epistemic_uncertainty", "schema_gap", "shield_pruned_all_branches"] },
+          "evidence": { "type": "array", "items": { "type": "string", "format": "uuid" } }
+        }
+      } } }
+    }
+  ]
+}
