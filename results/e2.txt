@@ -1,0 +1,38 @@
+==============================================================================
+E2  forward passes to cut loss 20x vs width   (lower is better)
+    minibatch=8, budget=120000 fwd, best LR per cell
+==============================================================================
+ n_hidden   params      exact   1 scalar    4 lanes   16 lanes
+       16      256         30        980        600        160
+       32      512         70      3,760        880        220
+       64     1024        230     27,400      1,740        500
+      128     2048        320     50,280      5,760      1,760
+
+  log-log slope of cost vs width  (exact is the baseline slope):
+      exact gradient:   1.20
+           1 lane(s):   1.99
+           4 lane(s):   1.08
+          16 lane(s):   1.16
+
+==============================================================================
+  slowdown vs exact gradient, as a function of UNITS PER LANE
+  (this, not parameter count, is what sets the required bus width)
+==============================================================================
+ units/lane   slowdown vs exact     from (n_hidden, lanes)
+          1                5.3x                   (16, 16)
+          2                3.1x                   (32, 16)
+          4                2.2x                   (64, 16)
+          4               20.0x                    (16, 4)
+          8                5.5x                  (128, 16)
+          8               12.6x                    (32, 4)
+         16                7.6x                    (64, 4)
+         16               32.7x                    (16, 1)
+         32               18.0x                   (128, 4)
+         32               53.7x                    (32, 1)
+         64              119.1x                    (64, 1)
+        128              157.1x                   (128, 1)
+
+  slowdown ~ (units per lane)^0.80
+  -> a single global scalar is not viable at scale; the cost of
+     credit is set by fan-out per lane, which is a bus-width
+     parameter the architecture gets to choose.

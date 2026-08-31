@@ -1,0 +1,88 @@
+==============================================================================
+E4.1  training-time resident memory   (7B params, seq 8192, batch 8)
+==============================================================================
+  line item                 transformer  this design      ratio
+  weights                       13.04 GB       3.26 GB         4x
+  gradients                     13.04 GB             -         --
+  optimizer state               78.23 GB             -         --
+  traces + accumulators                -      19.56 GB         --
+  activations (backward)        16.00 GB     256.00 KB    65,536x
+  recurrent state                      -      64.00 MB         --
+  --------------------------------------------------------------
+  TOTAL                        120.31 GB      22.88 GB         5x
+
+  Honest split of that 5.3x: the parameter side (104 GB -> 23 GB) is only 4.6x.
+  The activation side is 65,536x.  Deleting backprop-through-time is
+  where the memory win lives; low-precision weights are a rounding
+  error by comparison. The plan under-sells one and over-sells the other.
+
+==============================================================================
+E4.2  inference-time state   (same model, per sequence)
+==============================================================================
+  KV cache at 128k ctx:             16.00 GB   grows with context
+  recurrent state:                 0.0078 GB   flat in context
+  ratio:                            2,048x
+  HBM cost of that KV cache:   $      240 per concurrent sequence
+
+==============================================================================
+E4.3  per-step inter-device traffic
+==============================================================================
+  data-parallel ring allreduce:      26.08 GB/step
+  4096-lane credit bus:              16.00 KB/step
+  ratio:                         1,708,984x
+  link energy per step:              0.448 J   vs 0.262 uJ
+
+  This is the largest ratio in the entire design and the one that
+  justifies deleting the interconnect fabric. It is also the claim
+  most exposed to E2: the bus only works if it has enough lanes.
+
+==============================================================================
+E4.4  does the experience store fit on an SSD?
+==============================================================================
+       100,000 episodes x 64 steps ->    0.02 TB   NAND $         1   HBM $          372
+     1,000,000 episodes x 64 steps ->    0.24 TB   NAND $        15   HBM $        3,719
+    10,000,000 episodes x 64 steps ->    2.42 TB   NAND $       149   HBM $       37,193
+
+  feeding 100,000 replayed steps/s needs 0.42 GB/s; one NVMe delivers 7 GB/s
+  -> 17x headroom. The replay path is genuinely
+     SSD-shaped: append-mostly, read-sequential, cold, and huge.
+  -> and 250x cheaper per byte than HBM.
+
+==============================================================================
+E4.5  can the WEIGHTS live on the SSD too?
+==============================================================================
+  HBM          4,800 GB/s -> break-even batch           10 tokens/step
+  DRAM           400 GB/s -> break-even batch          125 tokens/step
+  NVMe SSD         7 GB/s -> break-even batch        7,143 tokens/step
+
+  Weight streaming from NAND needs a batch three orders of magnitude
+  larger than from HBM to stay compute-bound. For batched offline
+  training that is reachable; for single-agent online adaptation it
+  is not. So: experience on SSD yes, weights on SSD only in batch.
+  The weights want to be IN the compute, which is the actual argument
+  for compute-in-memory -- not density, but the deletion of this row.
+
+==============================================================================
+E4.6  the constraint the plan creates but does not budget for
+==============================================================================
+  Traces are read-modify-written once per weight per step. That is the
+  single worst access pattern for any tier except the one the weights
+  already sit in. It cannot go on NAND (endurance) and should not go
+  on HBM (that is the row we were deleting). It has to be on-die.
+  So on-die trace SRAM, not FLOPs, sets how large a model a die can adapt.
+
+   on-die SRAM   adapted params   as % of 7B   array area*
+         64 MB            22 M        0.32%         28 mm2
+        256 MB            89 M        1.28%        113 mm2
+      1,024 MB           358 M        5.11%        451 mm2
+
+  * array area only, at a 5nm-class 6T cell; excludes compute tiles,
+    I/O and the DRAM/NVM controllers.
+
+  This closes the design. A reticle-scale die can hold traces for
+  roughly 10^8 adapted parameters, not 10^10. The RPU is therefore not
+  a from-scratch pretraining chip -- it is a sparse-adaptation engine:
+  a large frozen low-precision backbone held in cheap memory, plus a
+  ~100M-parameter adapted surface whose traces live on-die. That is a
+  narrower and much more defensible product than the original framing,
+  and it is the only version the arithmetic actually supports.
