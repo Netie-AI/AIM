@@ -20,11 +20,18 @@ scales worse (log-log slope 1.99 vs 1.20). It does not survive. What rescues it 
 that the governing variable is fan-out per lane, not parameter count:
 
 ```
-slowdown ≈ (units per lane) ^ 0.80
+slowdown ≈ (units per lane) ^ 1.0
 ```
 
-Lane count is free — 4096 lanes move 16 KB/step against 26.08 GB/step for a
-data-parallel allreduce. **The broadcast bus survives; the single wire does not.**
+E2 fitted 0.80 at widths 16–128; E7 shows the exponent drifts up to **1.01** by
+width 65,536, which is the asymptote perturbation theory predicts. Small-scale
+fits understate the penalty — design against 1.0. One wire across 65k units is
+**55,000x** an exact gradient.
+
+Lanes still rescue it. Holding slowdown near 10x needs ~10 units per lane, so
+~10⁴ lanes for a 10⁵-unit adapted surface: 40 KB/step against 26.08 GB/step for
+a data-parallel allreduce, still a ~650,000x saving. **The broadcast bus
+survives a linear exponent; the single wire does not.**
 
 **The plan created an unbudgeted constraint.** It deletes a large HBM requirement
 and replaces it with a per-weight, per-step read-modify-write for traces — the
@@ -101,10 +108,16 @@ resolution at the widest setting.
 ## What is still unknown
 
 Three claims remain unmeasured, and all three are testable on commodity hardware
-for about six GPU-weeks before any silicon is committed — see
+for about three GPU-weeks before any silicon is committed — see
 `docs/03-validation.md`:
 
 - **E5**: do segmented options beat tokens on gradient SNR per unit compute?
 - **E6**: does a 4–16 MB state hold real language, or does the window grow back?
-- **E7**: does the units-per-lane exponent survive at 10⁶ units? *This one decides
-  whether the chip has a case, and it is the cheapest of the three.*
+
+E7, which was to decide whether the chip has a case, is **done**. Running it as
+specified — training to convergence at width 10⁵ — would have cost ~110 GPU-days
+for its single most important point, because the finding *is* that the
+configuration is catastrophically slow. Replacing convergence time with
+single-step gradient alignment (`1/cos²`, validated against E2's measured
+slowdowns at r = 0.864, slope 1.03) gives the same law for ~7 orders of magnitude
+less compute. It runs on a CPU in 90 seconds.

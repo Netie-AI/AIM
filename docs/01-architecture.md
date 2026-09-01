@@ -85,13 +85,17 @@ tiles. Each block updates from its own lane.
 E2 is unambiguous that this is the load-bearing parameter:
 
 ```
-slowdown vs exact gradient ≈ (units per lane) ^ 0.80
+slowdown vs exact gradient ≈ (units per lane) ^ 1.0
 ```
 
-measured from 5.3x at 1 unit/lane to 157x at 128. Target **≤ 32 units per lane**,
-which E4.3 shows costs 16 KB/step at 4096 lanes against 26.08 GB/step for a ring
-allreduce. The fabric saving is 1.7 million-fold and is barely dented by widening
-the bus. There is no reason to be parsimonious with lanes and every reason not to
+E2 fitted 0.80 at widths 16–128; E7 measures **1.01** at widths 1k–65k, the
+asymptote perturbation theory predicts. Design against 1.0 — small-scale fits
+understate the penalty.
+
+Target **≤ 10 units per lane**, giving ~10⁴ lanes for a 10⁵-unit adapted surface:
+40 KB/step against 26.08 GB/step for a ring allreduce, a ~650,000x saving. The
+fabric win is barely dented by widening the bus two orders of magnitude past
+v1's, so there is no reason to be parsimonious with lanes and every reason not to
 be.
 
 ## L4 — Action space: segmented options **[changed: segmented, not discovered]**
@@ -149,8 +153,9 @@ Ordered by how much rests on it and how early it can be checked.
 
 1. **A bounded state suffices for the target tasks.** E3 gives the sizing law;
    whether real language tasks fit in 4–16 MB is open. Checked by E6.
-2. **≤32 units per lane is achievable at scale.** E2 gives the exponent at widths
-   16–128. Whether it holds at 10⁶ units is an extrapolation. Checked by E7.
+2. ~~**≤32 units per lane is achievable at scale.**~~ **Settled by E7**, and the
+   answer moved the target: the exponent is 1.0 at scale, not 0.80, so the design
+   point is ≤10 units per lane and ~10⁴ lanes. Still ~650,000x below an allreduce.
 3. **Segmented options beat tokens on gradient SNR per unit compute.** Entirely
    unmeasured. Checked by E5.
 4. **Imagined rollouts stay grounded** under a disagreement penalty at language

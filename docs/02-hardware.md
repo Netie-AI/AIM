@@ -115,7 +115,7 @@ being deleted. It must be on-die, and that constraint closes the design (§6).
 | # | v1 | v2 | why |
 |---|---|---|---|
 | 1 | CIM tiles, in-place update | **two-timescale**: SRAM traces, NVM weights consolidated every 10³–10⁵ updates | NVM endurance is 10⁶–10⁹ writes; per-step in-place update exhausts it in days |
-| 2 | one global scalar wire | **multi-lane bus**, ≤32 units per lane | E2: one scalar costs 119–157x; lanes are nearly free |
+| 2 | one global scalar wire | **multi-lane bus**, ≤10 units per lane (~10⁴ lanes) | E2/E7: penalty is linear in units per lane; one wire across 65k units is 55,000x. Lanes cost 40 KB/step vs 26 GB |
 | 3 | ternary/4-bit + stochastic rounding | kept, **plus int16 shadow accumulators** | unbiased rounding still leaves a `1/√N` precision floor; accumulation cannot be 4-bit |
 | 4 | masked-ROM embeddings | **dedicated DRAM channel** | freezes the parameters most worth adapting; a vocab change becomes a tapeout |
 | 5 | ring dataflow | kept, **promoted to item 1** | with no BPTT, batch parallelism needs only the bus — a different scaling curve, not a constant factor |

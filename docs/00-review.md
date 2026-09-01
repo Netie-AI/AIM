@@ -185,11 +185,14 @@ The rescue is that the governing variable is not parameter count. Pooling all
 configurations, the penalty tracks **fan-out per lane**:
 
 ```
-slowdown ≈ (units per lane) ^ 0.80
+slowdown ≈ (units per lane) ^ 0.80        # widths 16-128
+slowdown ≈ (units per lane) ^ 1.01        # widths 1k-65k  (E7)
 ```
 
-with measured points from 5.3x at 1 unit/lane to 157x at 128 units/lane. Lane
-count is an architectural parameter. Modularity is what buys lanes: a
+with measured points from 5.3x at 1 unit/lane to 157x at 128 units/lane. E7 later
+showed the exponent drifts up toward the linear asymptote at realistic widths, so
+**design against 1.0**; the numbers in this section, fitted at small width, are
+the optimistic end. Lane count is an architectural parameter. Modularity is what buys lanes: a
 block-diagonal readout makes each module's error an independently measurable
 scalar at no extra forward cost.
 

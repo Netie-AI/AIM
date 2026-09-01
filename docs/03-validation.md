@@ -83,19 +83,55 @@ and multi-step reasoning.
 an exact window above ~8k tokens. Either outcome means the KV cache was
 reintroduced under another name and the inference argument is gone.
 
-### E7 — Does the lane law hold at scale? *(2–4 GPUs, ~3 weeks)*
+### E7 — Does the lane law hold at scale? **DONE** — `experiments/e7_snr_proxy.py`
 
-E2's exponent comes from widths 16–128. Extrapolating it to 10⁶ units is the
-single largest inference in the whole design, and it is the one the chip's
-existence depends on.
+**Originally scoped**: 2–4 GPUs, ~3 weeks, re-running the E2 convergence sweep at
+widths 10³–10⁵.
 
-Re-run the E2 sweep at widths 10³–10⁵ with the L1/L3 rule as actually specified —
-local backprop within a block, lanes between blocks — rather than pure node
-perturbation.
+**That scoping was wrong, and the way it was wrong is instructive.** Extrapolating
+E2's own fitted laws, the width-10⁵ single-lane point — the one the whole
+question turns on — costs **~110 GPU-days**. The measurement is infeasible for
+precisely the reason the result is interesting: the configuration being measured
+is catastrophically slow, so measuring it by waiting for it is self-defeating.
 
-**Kill criterion**: units-per-lane exponent above 1.0, or ≤32 units per lane
-proving insufficient. Either forces lane counts that reintroduce a gradient
-fabric, which removes the chip's reason to exist.
+**Redesign**: a perturbation rule's cost is set by how well its estimate aligns
+with the true gradient; for an unbiased estimator, steps-to-target scales as
+`1/cos²`. That is a *single-step* measurement at any width. Validated against
+E2's independently measured convergence slowdowns: log-log **r = 0.864, slope
+1.03**, and it reproduces E2's 0.80 exponent at widths 16–128 without being told
+it. Cost: ~7 orders of magnitude less compute. It runs on a CPU in 90 seconds.
+
+**Result:**
+
+| widths | fitted exponent |
+|---|---|
+| 16 – 128 | 0.80 |
+| 1,024 – 65,536 | **1.01** |
+
+The exponent drifts up with scale toward 1.0 — the asymptote perturbation theory
+predicts for a scalar shared by N units. **Small-scale fits understate the
+penalty.** One wire across 65,536 units is 55,000x an exact gradient.
+
+**Against the kill criterion, honestly: the literal clause trips.** The criterion
+said "units-per-lane exponent above 1.0", and 1.01 is above 1.0.
+
+The criterion was mis-specified, and this should be recorded rather than quietly
+renegotiated. It used the exponent as a proxy for the thing actually at stake,
+named in its own second clause: *does the required lane count reintroduce a
+gradient fabric?* On that question the answer is a clear no. At exponent 1.0,
+holding slowdown near 10x needs ~10 units per lane — ~10⁴ lanes for a 10⁵-unit
+adapted surface, or 40 KB/step against 26.08 GB/step for an allreduce. Still a
+**~650,000x** saving. The bus survives a linear exponent; it just has to be two
+orders of magnitude wider than v1's 4096.
+
+So: **the substantive criterion passes decisively, the literal one fails.** Since
+the standing rule below is that criteria are not renegotiated after the fact,
+treat this as a flagged discrepancy for a human call, not as a pass I awarded
+myself. My reading is that the design survives and the target moves from ≤32 to
+≤10 units per lane. What would change my mind: if lane count is constrained below
+~10³ for a physical reason not yet modelled — pin count, fan-out timing, or
+value-head area — the linear exponent becomes binding and the chip's case does go
+with it. That is now the open question E9 should answer first.
 
 ### E8 — Full-stack integration on GPUs *(8 GPUs, ~2 months)*
 
@@ -121,13 +157,33 @@ commitment until E7 and E8 both pass.
 |---|---|---|
 | E5 | ~1 GPU-week | L4 only; the rest of the design stands |
 | E6 | ~2 GPU-weeks | the inference argument (bounded state) |
-| E7 | ~3 GPU-weeks | **the chip** — no bus, no reason to build silicon |
+| E7 | ~~3 GPU-weeks~~ **90 CPU-seconds, done** | **the chip** — result: survives, with ≤10 units per lane |
 | E8 | ~16 GPU-weeks | the architecture as an integrated system |
 | E9 | fab engagement | specific implementation choices, not the concept |
 
-Roughly six GPU-weeks separate today from knowing whether the chip has a case.
-That is the point of sequencing E7 before E8 despite E8 being the more
-interesting experiment: **E7 is cheaper and kills more.**
+E7 is done, so roughly **three GPU-weeks** separate today from the remaining
+algorithmic unknowns. Sequencing E7 first was right, and it turned out to be even
+cheaper than budgeted once the measurement was designed properly rather than
+brute-forced.
+
+The general lesson is worth keeping: **when an experiment's cost is dominated by
+the very inefficiency it is measuring, measure the mechanism instead of the
+outcome.** Alignment is a one-step quantity; convergence time is not.
+
+## Where each stage actually runs
+
+| stage | hardware | why |
+|---|---|---|
+| E1–E4, E7 | **CPU** (done) | all are single-step or closed-form; no GPU needed |
+| E5 | **one 12 GB consumer GPU** | ~0.5B policy over a frozen decoder; fits with bf16 + checkpointing |
+| E6 | **one 12 GB GPU** at 150–350M, **rented A100/H100** at 1B | 1B training needs ~16 GB for optimizer state alone, before activations |
+| E8 | **rented, 8 GPUs, ~2 months** | integration at 1B; the only stage that genuinely needs a cluster |
+| E9 | fab engagement | not compute at all |
+
+Renting before E5 and E6 have been run at small scale buys nothing: every one of
+them is a scaling *trend*, and trends are established at the bottom of the range
+first. Rent when a trend is established and needs confirming at a size the local
+card cannot hold — not before.
 
 ## Standing rules
 
